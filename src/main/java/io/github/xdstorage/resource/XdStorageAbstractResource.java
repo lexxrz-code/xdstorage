@@ -53,6 +53,18 @@ public abstract class XdStorageAbstractResource implements IXdStorageResourceObj
     protected final XdStorageResourceCache cache;
 
     /**
+     * TASK-42 (racing-commit residue probe): read-only view of this resource's record
+     * registry for engine-internal callers outside the resource package — the FK layer
+     * discriminates a dangling-arm candidate by its record's last-mutation stamp (the
+     * first-committer-wins timestamp). Engine-internal — not part of the public API.
+     *
+     * @return the resource's live record map (synchronize on the record when probing)
+     */
+    public java.util.Map<Object, io.github.xdstorage.resource.cache.XdStorageCacheRecord> cacheRecords() {
+        return cache.records();
+    }
+
+    /**
      * Builds a non-references resource with in-process id generation.
      *
      * @param services   engine services shared with collaborators

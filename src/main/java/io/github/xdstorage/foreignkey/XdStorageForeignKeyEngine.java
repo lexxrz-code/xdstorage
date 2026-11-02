@@ -338,6 +338,10 @@ public class XdStorageForeignKeyEngine implements IXdStorageForeignKeyEngine {
         for (Object childObjectId : childIds) {
             // FNKEY: the update diff removes the reference legitimately — the blind
             // dissolve (parentObject = null), no dangling-child expectation.
+            // [T42-DIAG] инструментация дуэли: кого дифф растворяет вслепую
+            org.slf4j.LoggerFactory.getLogger(XdStorageForeignKeyEngine.class).warn(
+                    "[T42-DIAG] BLIND-DISSOLVE {}#{} -> child {} (tx {})",
+                    clInfo.getClazz().getSimpleName(), parentObjectId, childObjectId, transaction.getTransactionId());
             resource.delete(null, parentObjectId, null, (Comparable<?>) childObjectId, transaction);
         }
     }

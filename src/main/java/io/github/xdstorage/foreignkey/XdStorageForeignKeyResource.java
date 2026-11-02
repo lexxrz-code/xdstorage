@@ -499,6 +499,11 @@ public class XdStorageForeignKeyResource implements IXdStorageForeignKeyResource
             } else {
                 // FNKEY: the PARENT side dissolves the relation while the child survives —
                 // the child is now dangling; it must be deleted within this transaction.
+                // [T42-DIAG] инструментация дуэли: полный контекст армирования со штампами
+                log.warn("[T42-DIAG] ARM dangling {}#{} -> child {} (tx {}): childLive=true, inParentCollection=true, childDeleted=false, childRecordTs={}, txTimestart={}, racing={}",
+                        relationName(), parentObjectId, childObjectId, transaction.getTransactionId(),
+                        childMutationStamp(childObjectId, transaction), transaction.getTimestart(),
+                        childMutatedAfterSnapshotStart(childObjectId, transaction));
                 danglingChildren.computeIfAbsent(transaction.getTransactionId(), tId -> ConcurrentHashMap.newKeySet())
                         .add(childObjectId);
             }
@@ -586,6 +591,38 @@ public class XdStorageForeignKeyResource implements IXdStorageForeignKeyResource
                     clChildInfo.getClazz().getSimpleName(), childObjectId, probeFailure.getMessage());
             return true;
         }
+    }
+
+    /**
+     * [T42-DIAG] TASK-42 (racing-commit residue probe): the child record's last-mutation
+     * stamp — the timestart of the transaction that last wrote it (the first-committer-wins
+     * stamp of the mutator). Read-only diagnostics for the dangling-arm discriminator.
+     */
+    private Long childMutationStamp(final Comparable<?> childObjectId, final XdStorageTransaction transaction) {
+        try {
+            final io.github.xdstorage.resource.IXdStorageDaoResource dao =
+                    services.getResourcesManager().lockResource(clChildInfo, childObjectId, transaction);
+            if (dao instanceof io.github.xdstorage.resource.XdStorageResource) {
+                final io.github.xdstorage.resource.cache.XdStorageCacheRecord record =
+                        ((io.github.xdstorage.resource.XdStorageResource) dao).cacheRecords().get(childObjectId);
+                return record != null ? record.getRecordTimestamp() : null;
+            }
+        } catch (final Exception probeFailure) {
+            log.warn("[T42-DIAG] child mutation stamp probe failed for {}#{}: {}",
+                    clChildInfo.getClazz().getSimpleName(), childObjectId, probeFailure.getMessage());
+        }
+        return null;
+    }
+
+    /**
+     * [T42-DIAG] TASK-42: whether the child was last mutated by a transaction YOUNGER than
+     * the deleting transaction — i.e. the deleting transaction's snapshot never contained
+     * this state, and no action of the deleting transaction could have enumerated or
+     * removed it (the racing-commit residue class).
+     */
+    private boolean childMutatedAfterSnapshotStart(final Comparable<?> childObjectId, final XdStorageTransaction transaction) {
+        final Long stamp = childMutationStamp(childObjectId, transaction);
+        return stamp != null && stamp > transaction.getTimestart();
     }
 
     /**
